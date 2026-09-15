@@ -133,12 +133,34 @@
     -webkit-appearance: none; appearance: none;
   }
   .btn-continue:hover { background: #268a5d; }
-  .passed-list { margin-top: 12px; display: flex; gap: 8px; justify-content: center; }
-  .passed-list span {
-    width: 26px; height: 26px; border-radius: 50%; background: #e3e9f0; color: #9aa7b8;
-    display: flex; align-items: center; justify-content: center; font-size: 13px;
+  .btn-continue.retry { background: var(--accent); }
+  .btn-continue.retry:hover { background: var(--accent-dark); }
+
+  .stage-bar { margin-top: 14px; display: flex; gap: 4px; height: 32px; }
+  .stage-seg {
+    flex-basis: 0; min-width: 30px; border-radius: 8px; cursor: pointer;
+    background: #e3e9f0; color: #8b98ab; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+    transition: filter .15s; border: 1.5px solid transparent;
+    -webkit-user-select: none; user-select: none; font-family: inherit;
   }
-  .passed-list span.hit { background: var(--ok); color: #fff; }
+  .stage-seg.done { background: #d8f2e6; color: var(--ok); font-weight: 700; }
+  .stage-seg.cur {
+    background: #fdf3f6; color: var(--accent-dark); font-weight: 700;
+    border-color: var(--accent);
+  }
+  .stage-seg.locked { cursor: not-allowed; opacity: .7; }
+  .stage-seg:hover:not(.locked) { filter: brightness(.95); }
+  .stage-legend {
+    text-align: center; font-size: 12.5px; color: #8a97a8; margin-top: 7px; line-height: 1.6;
+  }
+  .toast {
+    position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+    background: rgba(20,28,40,.9); color: #fff; font-size: 13px; line-height: 1.5;
+    padding: 8px 16px; border-radius: 8px; z-index: 12; display: none;
+    max-width: 86%; text-align: center;
+  }
+  .toast.show { display: block; }
   .tip-bar {
     margin-top: 14px; background: var(--card); border-radius: 10px;
     padding: 12px 16px; box-shadow: 0 2px 10px rgba(47,58,77,.08);
@@ -164,9 +186,10 @@
     <button class="cc-btn on" id="ccBtn" title="字幕开关">字</button>
     <button class="fs-btn" id="fsBtn" title="全屏">⛶</button>
     <div class="sub-line" id="subLine"></div>
+    <div class="toast" id="toast"></div>
     <div class="quiz-mask" id="quizMask">
       <div class="quiz-card">
-        <span class="tag">随堂提问 <span id="quizNo"></span>/6</span>
+        <span class="tag"><span id="stageTag">第 1 阶段</span> · 随堂提问 <span id="quizNo"></span>/6</span>
         <h3 id="quizQ"></h3>
         <div id="quizOpts"></div>
         <div class="quiz-msg" id="quizMsg"></div>
@@ -175,8 +198,9 @@
     </div>
   </div>
 
-  <div class="tip-bar">进度条可自由拖动 ｜ 播放或拖动到达考查点会自动暂停出题（跳过的题会依序补出），答对后继续 ｜ 可点击「字」开关字幕</div>
-  <div class="passed-list" id="passedList"></div>
+  <div class="tip-bar">课程按随堂提问分为若干阶段 ｜ 每个阶段学完会自动暂停出题，<b>答错需重看本阶段</b>，答对才能进入下一阶段 ｜ 进度条仅可回看已解锁内容 ｜ 可点击「字」开关字幕</div>
+  <div class="stage-bar" id="stageBar"></div>
+  <div class="stage-legend" id="stageLegend">阶段加载中…</div>
 
   <footer>本课程由 AI 辅助生成 ｜ 仅用于内部培训</footer>
 </div>
@@ -196,17 +220,88 @@ const quizQ = document.getElementById('quizQ');
 const quizOpts = document.getElementById('quizOpts');
 const quizMsg = document.getElementById('quizMsg');
 const btnGo = document.getElementById('btnGo');
-const passedList = document.getElementById('passedList');
+const stageBar = document.getElementById('stageBar');
+const stageLegend = document.getElementById('stageLegend');
+const stageTag = document.getElementById('stageTag');
+const toastEl = document.getElementById('toast');
 
 /* ---------- 随堂题库（由脚本注入） ---------- */
 const QUIZZES = [{"t": 264.7, "q": "CDK4/6抑制剂能够发挥作用的首要前提，也是其目标人群的特征是？", "opts": ["激素受体阳性、HER2阴性", "激素受体阴性、HER2阳性", "三阴性乳腺癌", "激素受体阴性、HER2低表达"], "a": 0, "exp": "CDK4/6抑制剂的适用人群是激素受体阳性（HR+）、HER2阴性的乳腺癌。激素受体阳性意味着肿瘤生长依赖激素，这是联合内分泌治疗的前提；HER2阴性则排除了HER2扩增驱动的类型。记忆钩子：断粮（内分泌）＋停电（CDK4/6），前提是肿瘤得靠激素吃饭。"}, {"t": 523.0, "q": "关于CDK4/6抑制剂的服药方法，下列哪项说法是正确的？", "opts": ["阿贝西利采用\"吃3周、停1周\"的间歇给药方案", "哌柏西利采用每日连续给药，没有停药间隔", "达尔西利在服药前后1小时内需要空腹", "发生漏服时，应在当天补服双倍剂量"], "a": 2, "exp": "四种药物中只有阿贝西利为每日连续给药，哌柏西利、瑞波西利、达尔西利均为\"吃3周、停1周\"；达尔西利服药前后1小时内需空腹，其他药物建议随餐或餐后半小时内服用；发生呕吐或漏服时当天不补服，更不可一次服用双倍剂量。"}, {"t": 851.5, "q": "关于CDK4/6抑制剂引起的中性粒细胞减少，下列哪项处理原则是错误的？", "opts": ["一级或二级中性粒细胞减少，四种药物均不需要调整剂量", "三级中性粒细胞减少通常需暂停用药，恢复至≤2级后可考虑重启治疗", "四级中性粒细胞减少应暂停用药，恢复至≤2级后再评估剂量水平", "出现三级中性粒细胞减少时，应立即永久停用该药物"], "a": 3, "exp": "三级中性粒细胞减少通常先暂停用药，待恢复至≤2级后可同剂量重启或在下调剂量后继续，并非永久停药。只有四级严重肝损伤等特定情形才需永久停药。记忆钩子：一二级照常吃，三四级先停药再评估，永久停药是极少数情况。"}, {"t": 1072.0, "q": "关于CDK4/6抑制剂相关药物性肝损伤，下列哪项描述是正确的？", "opts": ["多数患者会出现明显的黄疸、乏力等自觉症状", "在联合内分泌治疗的患者中，发生率约为13%~15%", "四级肝损伤可继续原剂量用药，并密切观察", "整个治疗期间只需在治疗前完成一次肝功能检查"], "a": 1, "exp": "药物性肝损伤多表现为无症状的转氨酶升高（ALT、AST），必须靠化验发现，因此监测方案为基线、前2个月每2周1次、后续每月1次；四级为严重肝损伤，需立即永久停药。记忆钩子：肝损伤最会\"藏\"，靠的是按时抽血而不是患者主诉。"}, {"t": 1342.5, "q": "关于CDK4/6抑制剂相关的QT间期延长，下列说法正确的是？", "opts": ["治疗前无需进行心电图检查，治疗中监测即可", "大多数QT间期的变化出现在开始治疗后的第1个周期内", "出现QTc大于480毫秒时，应继续原剂量用药并观察", "QT间期延长一旦发生即为不可逆改变"], "a": 1, "exp": "QT间期延长大多在开始治疗后的第1个周期内即可观察到，且通常为可逆性改变，暂停用药或调整剂量后多可恢复至基线。治疗前必须完成心电图建立基线数据；QTc大于480毫秒需暂停用药，恢复后减量。"}, {"t": 1446.8, "q": "关于CDK4/6抑制剂与其他药物联用，下列说法正确的是？", "opts": ["与轻、中度CYP3A4抑制剂联用无需调整剂量，但应密切监测不良反应", "强效CYP3A4诱导剂会提高CDK4/6抑制剂的血药浓度", "达尔西利与强效CYP3A4抑制剂联用时，只需减少至200毫克每日一次", "服药期间饮用葡萄柚汁对CDK4/6抑制剂的代谢没有影响"], "a": 0, "exp": "轻、中度CYP3A4抑制剂联用无需调整剂量，但需密切监测不良反应体征；强效CYP3A4诱导剂会降低CDK4/6抑制剂的血浆浓度，应避免同服；达尔西利与强效CYP3A4抑制剂联用时需暂停使用；服药期间应避免葡萄柚（西柚）及其果汁。"}];
 
-/* 答题进度圆点 */
-QUIZZES.forEach((_, i) => {
-  const s = document.createElement('span');
-  s.textContent = i + 1;
-  passedList.appendChild(s);
-});
+/* ---------- 阶段划分：题 N 位于「第 N 阶段」的末尾，答错回退到本阶段起点 ---------- */
+/* 阶段 i 的时间区间 = [上一题时刻, 本题时刻]；最后一个阶段为收尾段，无提问 */
+const STAGES = QUIZZES.map((qz, i) => ({ start: i === 0 ? 0 : QUIZZES[i - 1].t, quiz: i }));
+STAGES.push({ start: QUIZZES.length ? QUIZZES[QUIZZES.length - 1].t : 0, quiz: -1 });
+const TOTAL_STAGES = STAGES.length;
+
+/* 状态 */
+let gating = false;
+let quizIdx = -1;
+let retryMode = false;
+const passed = new Set();
+
+function totalDur() {
+  return (video.duration && isFinite(video.duration))
+    ? video.duration
+    : (STAGES[TOTAL_STAGES - 1].start + 90);
+}
+function stageEnd(i) {
+  return (i < TOTAL_STAGES - 1) ? STAGES[i + 1].start : totalDur();
+}
+/* 第一个未答对题的时刻 = 已解锁的最远位置 */
+function currentLimit() {
+  for (let i = 0; i < QUIZZES.length; i++) {
+    if (!passed.has(i)) return QUIZZES[i].t;
+  }
+  return totalDur();
+}
+function curStageIdx() {
+  for (let i = 0; i < QUIZZES.length; i++) {
+    if (!passed.has(i)) return i;
+  }
+  return TOTAL_STAGES - 1;
+}
+
+let toastTimer = null;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
+}
+
+/* 渲染阶段条：已完成=绿✓，当前=粉框，未解锁=灰 */
+function renderStages() {
+  const total = totalDur();
+  const cur = curStageIdx();
+  const lim = currentLimit();
+  stageBar.innerHTML = '';
+  STAGES.forEach((st, i) => {
+    const seg = document.createElement('div');
+    seg.className = 'stage-seg';
+    seg.style.flexGrow = Math.max(0.8, (stageEnd(i) - st.start) / total * 100);
+    const unlocked = st.start <= lim + 0.5;
+    if (i < cur) { seg.classList.add('done'); seg.textContent = '✓'; }
+    else {
+      seg.textContent = String(i + 1);
+      if (i === cur) seg.classList.add('cur');
+    }
+    if (!unlocked) seg.classList.add('locked');
+    seg.title = '第 ' + (i + 1) + ' 阶段' + (unlocked ? '（点击跳转）' : '（未解锁）');
+    seg.onclick = () => {
+      if (!unlocked) { toast('请先完成当前阶段的学习与随堂提问'); return; }
+      video.currentTime = st.start;
+      const p = video.play(); if (p && p.catch) p.catch(() => {});
+      renderStages();
+    };
+    stageBar.appendChild(seg);
+  });
+  stageLegend.textContent = '共 ' + TOTAL_STAGES + ' 个阶段 ｜ 当前第 ' + (cur + 1) + ' 阶段'
+    + (cur < QUIZZES.length ? ' —— 学完本阶段需答对随堂提问才能继续' : ' —— 收尾阶段，无提问');
+}
+renderStages();
+video.addEventListener('loadedmetadata', renderStages);
+video.addEventListener('durationchange', renderStages);
 
 /* ---------- 自适应播放器：探测 Range 支持，HTTP 206 则原生流式（首屏即播、可拖动）；否则整片预载为 Blob ---------- */
 (async function preload() {
@@ -277,10 +372,6 @@ video.addEventListener('seeked', updateSub);
 refreshCC();
 
 /* ---------- 弹窗逻辑：到达或拖动越过未作答题 => 依序弹出 ---------- */
-let gating = false;
-let quizIdx = -1;
-const passed = new Set();
-
 video.addEventListener('timeupdate', () => {
   if (gating) return;
   const t = video.currentTime;
@@ -288,9 +379,20 @@ video.addEventListener('timeupdate', () => {
   if (due >= 0) openQuiz(due);
 });
 
+/* ---------- 进度锁定：不允许跳到尚未解锁的阶段 ---------- */
+video.addEventListener('seeking', () => {
+  const lim = currentLimit();
+  if (video.currentTime > lim + 0.6) {
+    video.currentTime = lim;
+    toast('后面的内容尚未解锁，请先完成当前阶段的学习与提问');
+  }
+});
+video.addEventListener('seeked', renderStages);
+
 function openQuiz(i) {
   gating = true;
   quizIdx = i;
+  retryMode = false;
   // 容器全屏内直接弹题；仅 iPhone 原生视频全屏（网页元素无法覆盖）时先退出
   if (!fsElement() && video.webkitDisplayingFullscreen) {
     try { video.webkitExitFullscreen(); } catch (e) {}
@@ -298,11 +400,14 @@ function openQuiz(i) {
   video.pause();                     // 原地暂停，不回跳
   setTimeout(() => {
     const qz = QUIZZES[i];
+    stageTag.textContent = '第 ' + (i + 1) + ' 阶段';
     quizNo.textContent = i + 1;
     quizQ.textContent = qz.q;
     quizMsg.textContent = '';
     quizMsg.className = 'quiz-msg';
     btnGo.style.display = 'none';
+    btnGo.textContent = '继续观看 ▶';
+    btnGo.className = 'btn-continue';
     quizOpts.innerHTML = '';
     qz.opts.forEach((txt, k) => {
       const b = document.createElement('button');
@@ -323,22 +428,39 @@ function choose(btn, k, qz) {
     btn.classList.add('correct');
     quizMsg.textContent = '✓ 回答正确！' + qz.exp;
     quizMsg.className = 'quiz-msg good';
+    btnGo.textContent = '进入第 ' + (quizIdx + 2) + ' 阶段 ▶';
+    btnGo.className = 'btn-continue';
     btnGo.style.display = 'block';
     passed.add(quizIdx);
-    passedList.children[quizIdx].classList.add('hit');
+    retryMode = false;
+    renderStages();
   } else {
+    // 答错：公布正确答案与解析，要求回看本阶段（只退到本阶段起点，不退回更早阶段）
     btn.classList.add('wrong');
-    btn.disabled = true;
-    quizMsg.textContent = '✗ 不对哦，再想一想～ 提示：结合刚才讲到的内容作答';
+    opts.forEach(o => o.disabled = true);
+    if (opts[qz.a]) opts[qz.a].classList.add('correct');
+    quizMsg.textContent = '✗ 回答错误。正确答案：' + 'ABCD'[qz.a] + '。' + qz.exp
+      + '　请重看第 ' + (quizIdx + 1) + ' 阶段后再次作答。';
     quizMsg.className = 'quiz-msg bad';
+    btnGo.textContent = '重看第 ' + (quizIdx + 1) + ' 阶段 ▶';
+    btnGo.className = 'btn-continue retry';
+    btnGo.style.display = 'block';
+    retryMode = true;
   }
 }
 
 btnGo.onclick = () => {
+  const backTo = retryMode ? STAGES[quizIdx].start : -1;
+  retryMode = false;
   mask.classList.remove('show');
   gating = false;
+  if (backTo >= 0) {
+    video.currentTime = backTo;      // 回到本阶段起点
+    toast('已回到第 ' + (quizIdx + 1) + ' 阶段开头，请重新观看');
+  }
   const p = video.play();
   if (p && p.catch) p.catch(() => {});
+  renderStages();
 };
 
 /* ---------- 全屏：作用于播放器容器（弹窗/字幕随容器全屏） ---------- */
